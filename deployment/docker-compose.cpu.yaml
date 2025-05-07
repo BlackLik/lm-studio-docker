@@ -1,0 +1,26 @@
+services:
+  lmstudio:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+    container_name: lmstudio-cpu
+    ports:
+      - "1234:1234"
+      - "5900:5900"
+    volumes:
+      - ~/.cache/lm-studio/models:/root/.cache/lm-studio/models
+    environment:
+      - CONTEXT_LENGTH=32768
+    restart: unless-stopped
+
+  novnc:
+    image: bonigarcia/novnc:1.2.0
+    container_name: lmstudio-novnc
+    ports:
+      - "6080:6080"
+    environment:
+      AUTOCONNECT: "true"
+      VNC_SERVER: "lmstudio:5900"
+      VNC_PASSWORD: "changeme"
+    depends_on:
+      - lmstudio

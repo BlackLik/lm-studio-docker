@@ -1,0 +1,69 @@
+# Базовый образ с поддержкой NVIDIA CUDA и cuDNN
+FROM nvidia/cuda:12.6.1-cudnn-devel-ubuntu24.04
+
+##### ПЕРЕМЕННЫЕ #####
+# Версия LM Studio
+ARG LSTUDIO_VERSION=0.3.15-11
+# URL для скачивания AppImage
+ARG LSTUDIO_URL="https://installers.lmstudio.ai/linux/x64/${LSTUDIO_VERSION}/LM-Studio-${LSTUDIO_VERSION}-x64.AppImage"
+# Пароль для VNC-сессии
+ARG VNC_PASSWORD=changeme
+
+# Не показываем диалоги при установке пакетов
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:99
+
+# Рабочая папка в контейнере
+WORKDIR /opt/lmstudio
+
+##### УСТАНОВКА СИСТЕМНЫХ ЗАВИСИМОСТЕЙ #####
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    wget \
+    # локали и раскладка клавиатуры
+    keyboard-configuration console-setup tzdata \
+    # X11 и OpenGL
+    dbus x11-utils x11-xserver-utils libgl1-mesa-glx \
+    # FUSE для запуска AppImage
+    libfuse2 kmod fuse \
+    # Библиотеки для GUI (Chromium внутри LM Studio)
+    libglib2.0-0 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libgtk-3-0 libgbm1 libasound2 \
+    # X-сервер для отрисовки и VNC
+    xserver-xorg xvfb x11vnc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Безопасно конфигурируем клавиатуру
+RUN dpkg-reconfigure -f noninteractive keyboard-configuration
+
+##### ЗАГРУЗКА И РАСПАКОВКА LM STUDIO #####
+# Скачиваем AppImage, делаем его исполняемым и распаковываем
+RUN wget -O LM-Studio.AppImage ${LSTUDIO_URL} && \
+    chmod +x LM-Studio.AppImage && \
+    ./LM-Studio.AppImage --appimage-extract && \
+    mv squashfs-root squashfs && \
+    rm LM-Studio.AppImage
+
+# Фиксим права на chrome-sandbox для корректной работы внутри контейнера
+RUN chmod 4755 /opt/lmstudio/squashfs/chrome-sandbox
+
+##### КОНФИГУРАЦИЯ VNC #####
+# Сохраняем VNC-пароль в зашифрованном виде
+RUN mkdir -p /root/.vnc && \
+    x11vnc -storepasswd "${VNC_PASSWORD}" /root/.vnc/passwd
+
+##### КОНФИГУРАЦИЯ ФАЙЛОВ ПРИЛОЖЕНИЯ И СКРИПТОВ #####
+# Копируем конфиги и скрипты из контекста сборки
+COPY ./config/keyboard           /etc/default/keyboard
+COPY ./config/http-server-config.json /opt/lmstudio/http-server-config.json
+COPY ./scripts/start.sh   /opt/lmstudio/scripts/start.sh
+
+# Делаем скрипт точкой входа исполняемым
+RUN chmod +x /opt/lmstudio/scripts/start.sh
+
+##### ПУТЬ ДО БИНАРЕЙ И ТОЧКА ВХОДА #####
+# Добавляем в PATH распакованный каталог с бинарями
+ENV PATH="/opt/lmstudio/squashfs/usr/bin:${PATH}"
+
+# По умолчанию запускаем ваш скрипт старта, который поднимет Xvfb, VNC и сам LM Studio
+CMD ["/opt/lmstudio/scripts/start.sh"]
